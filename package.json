@@ -1,0 +1,18 @@
+{
+  "name": "factorio-twitch-chaos",
+  "version": "1.0.0",
+  "description": "Twitch chat integration that triggers live events inside Factorio",
+  "main": "bot/bot.js",
+  "scripts": {
+    "start": "node bot/bot.js",
+    "test": "node --test bot/bot.test.js"
+  },
+  "dependencies": {
+    "tmi.js": "^1.8.5"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,37 @@
+{
+  "twitch": {
+    "username": "YOUR_BOT_USERNAME",
+    "oauth": "oauth:YOUR_OAUTH_TOKEN",
+    "channel": "YOUR_CHANNEL_NAME"
+  },
+  "factorio": {
+    "consolePath": "/path/to/factorio/script-output/commands.txt",
+    "rconHost": "",
+    "rconPort": 0,
+    "rconPassword": ""
+  },
+  "commands": {
+    "prefix": "!",
+    "globalCooldownSeconds": 30,
+    "perCommandCooldownSeconds": 60,
+    "allowedRoles": {
+      "meteor": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
+      "biter": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
+      "storm": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
+      "blackout": ["broadcaster", "moderator", "vip"],
+      "nuke": ["broadcaster", "moderator"],
+      "belt_reverse": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
+      "ore_delete": ["broadcaster", "moderator", "vip"]
+    }
+  },
+  "voting": {
+    "enabled": false,
+    "durationSeconds": 30,
+    "minimumVotes": 3
+  },
+  "randomEvents": {
+    "enabled": false,
+    "intervalMinutes": 10,
+    "events": ["meteor", "biter", "storm"]
+  }
+}
