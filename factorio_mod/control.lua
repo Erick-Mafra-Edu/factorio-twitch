@@ -39,6 +39,21 @@ remote.add_interface("twitch_events", {
     events.ore_delete()
   end,
 
+  --- Destroys up to `count` random rail segments near the player (1–50).
+  rail_destroy = function(count)
+    events.rail_destroy(count)
+  end,
+
+  --- Disables all burner machines for `duration` seconds (5–300).
+  combustion_stop = function(duration)
+    events.combustion_stop(duration)
+  end,
+
+  --- Spawns `count` enemies inside the player's base (1–15).
+  spawn_inside = function(count)
+    events.spawn_inside(count)
+  end,
+
   --- Nuclear explosion at (x, y).
   nuke = function(x, y)
     events.nuke(x, y)
@@ -47,7 +62,8 @@ remote.add_interface("twitch_events", {
 })
 
 -- ── Tick-based one-shot timer processing ──────────────────────────────────────
--- storm_queue and blackout_poles are populated by events.lua and consumed here.
+-- storm_queue, blackout_poles, and combustion_restore are populated by
+-- events.lua and consumed here on each game tick.
 
 local function process_timers(event)
   local tick = event.tick
@@ -68,19 +84,16 @@ local function process_timers(event)
     storage.storm_queue = remaining
   end
 
-  -- Blackout: restore poles when their duration has expired
+  -- Blackout: restore poles when their duration has expired.
+  -- Uses game.get_entity_by_unit_number() to avoid stale entity references.
   if storage.blackout_poles and #storage.blackout_poles > 0 then
     local remaining = {}
     for _, entry in ipairs(storage.blackout_poles) do
       if tick >= entry.tick then
-        local surface = game.surfaces[1]
-        if surface and surface.valid then
-          -- Re-enable by unit number; works even if the original reference is gone
-          for _, unit_number in ipairs(entry.unit_numbers) do
-            local pole = surface.find_entity_by_unit_number(unit_number)
-            if pole and pole.valid then
-              pole.active = true
-            end
+        for _, unit_number in ipairs(entry.unit_numbers) do
+          local pole = game.get_entity_by_unit_number(unit_number)
+          if pole and pole.valid then
+            pole.active = true
           end
         end
         game.print("[Twitch] 💡 Power restored!")
@@ -90,13 +103,33 @@ local function process_timers(event)
     end
     storage.blackout_poles = remaining
   end
+
+  -- Combustion: re-enable burner machines when their duration has expired.
+  if storage.combustion_restore and #storage.combustion_restore > 0 then
+    local remaining = {}
+    for _, entry in ipairs(storage.combustion_restore) do
+      if tick >= entry.tick then
+        for _, unit_number in ipairs(entry.unit_numbers) do
+          local entity = game.get_entity_by_unit_number(unit_number)
+          if entity and entity.valid then
+            entity.active = true
+          end
+        end
+        game.print("[Twitch] 🔥 Combustion machines restarted!")
+      else
+        table.insert(remaining, entry)
+      end
+    end
+    storage.combustion_restore = remaining
+  end
 end
 
 -- ── Initialisation ────────────────────────────────────────────────────────────
 
 script.on_init(function()
-  storage.storm_queue    = storage.storm_queue    or {}
-  storage.blackout_poles = storage.blackout_poles or {}
+  storage.storm_queue        = storage.storm_queue        or {}
+  storage.blackout_poles     = storage.blackout_poles     or {}
+  storage.combustion_restore = storage.combustion_restore or {}
   game.print("[Twitch Chaos] Mod loaded! Remote interface 'twitch_events' is active.")
 end)
 

@@ -13,16 +13,36 @@
   "commands": {
     "prefix": "!",
     "globalCooldownSeconds": 30,
-    "perCommandCooldownSeconds": 60,
-    "allowedRoles": {
-      "meteor": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
-      "biter": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
-      "storm": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
-      "blackout": ["broadcaster", "moderator", "vip"],
-      "nuke": ["broadcaster", "moderator"],
-      "belt_reverse": ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
-      "ore_delete": ["broadcaster", "moderator", "vip"]
+    "perCommandCooldownSeconds": 60
+  },
+  "difficulties": {
+    "easy": {
+      "description": "Fun, low-impact events. Free for everyone via chat or any cheer amount.",
+      "minBits": 0,
+      "allowedRoles": ["broadcaster", "moderator", "vip", "subscriber", "everyone"]
+    },
+    "medium": {
+      "description": "Moderate disruption. Requires subscriber status or 100 bits.",
+      "minBits": 100,
+      "allowedRoles": ["broadcaster", "moderator", "vip", "subscriber"]
+    },
+    "hard": {
+      "description": "Severe disruption. Requires 500 bits or moderator+ role.",
+      "minBits": 500,
+      "allowedRoles": ["broadcaster", "moderator"]
     }
+  },
+  "commandDifficulty": {
+    "meteor": "easy",
+    "biter": "easy",
+    "storm": "easy",
+    "belt_reverse": "easy",
+    "blackout": "medium",
+    "ore_delete": "medium",
+    "rail_destroy": "medium",
+    "combustion_stop": "medium",
+    "spawn_inside": "hard",
+    "nuke": "hard"
   },
   "voting": {
     "enabled": false,

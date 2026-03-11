@@ -4,8 +4,8 @@
 
 | Requirement | Details |
 |---|---|
-| **Node.js** | ≥ 16.0 |
-| **Factorio** | Version 1.1 or later |
+| **Node.js** | ≥ 18.0 (required for `node --test` test runner) |
+| **Factorio** | Version 2.0 or later |
 | **Twitch account** | A dedicated bot account is recommended |
 
 ---
@@ -20,8 +20,9 @@
 
 ## 2 – Install Node.js Dependencies
 
+From the **repository root** (where `package.json` lives):
+
 ```bash
-cd bot
 npm install
 ```
 
@@ -51,7 +52,9 @@ Edit `bot/config.json`:
 
 ## 4 – Install the Factorio Mod
 
-1. Copy the `factorio_mod/` folder to your Factorio mods directory:
+1. Copy the `factorio_mod/` folder to your Factorio mods directory and rename it to match the mod naming convention:
+
+   `twitch-factorio-chaos_1.0.0`
 
    | OS | Path |
    |---|---|
@@ -59,34 +62,11 @@ Edit `bot/config.json`:
    | Linux   | `~/.factorio/mods/twitch-factorio-chaos_1.0.0` |
    | macOS   | `~/Library/Application Support/factorio/mods/twitch-factorio-chaos_1.0.0` |
 
-2. Rename the folder to match the mod naming convention:  
-   `twitch-factorio-chaos_1.0.0`
-
-3. Enable the mod from the Factorio in-game mod manager.
+2. Enable the mod from the Factorio in-game mod manager.
 
 ---
 
-## 5 – Wire Up the Console File
-
-The bot writes `/silent-command` instructions to a plain text file.  
-Factorio can execute these via the in-game Lua console **or** you can watch the
-file externally and paste commands.
-
-A simpler approach is to use **RCON** (see *Optional: RCON* below).
-
-### Quick workaround (manual)
-
-Open Factorio's in-game console and run:
-
-```lua
-/silent-command game.print("Mod active!")
-```
-
-If you see the message, the mod is correctly installed.
-
----
-
-## 6 – Start the Bot
+## 5 – Start the Bot
 
 ```bash
 node bot/bot.js
@@ -96,17 +76,52 @@ The bot will connect to your Twitch channel and start listening for commands.
 
 ---
 
+## Difficulty Tiers & Twitch Monetization
+
+Events are grouped into three tiers. You can adjust the thresholds in `bot/config.json` under `difficulties`.
+
+| Tier | Access | Default Bit Cost | Description |
+|---|---|---|---|
+| 🟢 **Easy** | Everyone (free chat command) | 0 bits | Low-impact, fun events |
+| 🟡 **Medium** | Subscribers **or** 100 bits | 100 bits | Moderate disruption |
+| 🔴 **Hard** | Moderators+ **or** 500 bits | 500 bits | Severe disruption |
+
+### How viewers trigger events
+
+- **Chat command** – type the command in chat. Access is controlled by your Twitch role.
+- **Bits (cheer)** – cheer bits and include the command in your message:
+  `Cheer500 !nuke`  
+  If your bit amount meets or exceeds the tier's `minBits` threshold the event fires immediately.
+
+### Customising thresholds
+
+In `bot/config.json`, change `minBits` per tier:
+
+```json
+"difficulties": {
+  "medium": { "minBits": 200 },
+  "hard":   { "minBits": 1000 }
+}
+```
+
+To change which roles are allowed for each tier, edit `allowedRoles`.
+
+---
+
 ## Available Chat Commands
 
-| Command | Description | Min. Role |
+| Command | Difficulty | Description |
 |---|---|---|
-| `!meteor [x] [y]` | Meteorite impact at optional coordinates | everyone |
-| `!biter [count]` | Spawn biters (1–20, default 5) | everyone |
-| `!storm [duration]` | Lightning storm for *duration* seconds | everyone |
-| `!blackout [duration]` | Power outage for *duration* seconds | vip |
-| `!belt_reverse` | Reverse all transport belts | everyone |
-| `!ore_delete` | Delete ore near the player | vip |
-| `!nuke [x] [y]` | Nuclear explosion | moderator |
+| `!meteor [x] [y]` | 🟢 Easy | Meteorite impact at optional coordinates |
+| `!biter [count]` | 🟢 Easy | Spawn biters (1–20, default 5) |
+| `!storm [duration]` | 🟢 Easy | Lightning storm for *duration* seconds |
+| `!belt_reverse` | 🟢 Easy | Reverse all transport belts |
+| `!blackout [duration]` | 🟡 Medium | Power outage for *duration* seconds |
+| `!ore_delete` | 🟡 Medium | Delete ore near the player |
+| `!rail_destroy [count]` | 🟡 Medium | Destroy random rail segments (1–50) |
+| `!combustion_stop [duration]` | 🟡 Medium | Halt all burner machines temporarily |
+| `!spawn_inside [count]` | 🔴 Hard | Spawn enemies inside the base |
+| `!nuke [x] [y]` | 🔴 Hard | Nuclear explosion |
 
 ---
 
@@ -123,8 +138,7 @@ Enable in `config.json`:
 ```
 
 When active, triggering a command starts a 30-second vote.  
-Viewers type `!vote` to support it.  The event fires only if enough votes
-accumulate.
+Viewers type `!vote` to support it. The event fires only if enough votes accumulate.
 
 ---
 
@@ -156,8 +170,8 @@ The bot randomly selects and fires one of the listed events every N minutes.
 ```
 
 The bot detects a non-empty `rconHost` and routes commands through RCON
-instead of the file-based approach.  You can integrate an npm RCON library
-(e.g. `rcon`) in `bot/bot.js` in the `sendToFactorio` function.
+instead of the file-based approach. You can integrate an npm RCON library
+(e.g. `rcon`) in `bot/bot.js` inside the `sendToFactorio` function.
 
 ---
 
@@ -176,4 +190,6 @@ node --test bot/bot.test.js
 | Bot can't connect | Check username / OAuth token in config.json |
 | Events don't fire | Verify `consolePath` is correct and the mod is enabled |
 | `permission denied` on file write | Ensure the bot process has write access to script-output |
-| Command works in Twitch but nothing happens in-game | Open the Factorio console and check for Lua errors |
+| Command works in chat but nothing happens in-game | Open the Factorio console and check for Lua errors |
+| Bits event not triggering | Make sure the bit amount meets the tier threshold in config.json |
+| Combustion machines not restarting | Verify the mod is installed and Factorio 2.0 is being used |

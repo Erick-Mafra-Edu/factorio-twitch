@@ -4,6 +4,6 @@
   "title": "Twitch Factorio Chaos",
   "author": "factorio-twitch",
   "description": "Allows Twitch chat commands to trigger in-game chaos events via remote interface.",
-  "factorio_version": "1.1",
+  "factorio_version": "2.0",
   "dependencies": []
 }

@@ -1,14 +1,14 @@
 -- events.lua
 -- Implements all chaos events exposed through the remote interface.
--- One-shot timers are managed through storage tables processed in control.lua's
--- on_tick handler, because script.on_nth_tick registers *recurring* intervals
--- and cannot target a specific future tick directly.
+-- One-shot timers are managed via storage tables processed in control.lua's
+-- on_tick handler (script.on_nth_tick registers recurring intervals and cannot
+-- target a specific future tick directly).
 
 local events = {}
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
---- Returns the first valid connected player position, or {0, 0} as fallback.
+--- Returns the first valid connected player position, or {0,0} as fallback.
 local function get_player_position()
   for _, player in pairs(game.players) do
     if player.valid and player.connected then
@@ -21,6 +21,14 @@ end
 --- Clamps a number between min_val and max_val.
 local function clamp(value, min_val, max_val)
   return math.max(min_val, math.min(max_val, value))
+end
+
+--- Simple Fisher-Yates shuffle (in-place) for a Lua table.
+local function shuffle(t)
+  for i = #t, 2, -1 do
+    local j = math.random(i)
+    t[i], t[j] = t[j], t[i]
+  end
 end
 
 -- ── Meteor ────────────────────────────────────────────────────────────────────
@@ -76,8 +84,8 @@ function events.biter_attack(count)
 end
 
 -- ── Storm ─────────────────────────────────────────────────────────────────────
--- Lightning strikes are stored as a queue in storage.storm_queue and processed
--- by the on_tick handler in control.lua.
+-- Lightning strikes are queued in storage.storm_queue and processed by the
+-- on_tick handler in control.lua.
 
 --- Schedules a series of lightning strikes over `duration` seconds.
 function events.storm(duration)
@@ -102,8 +110,8 @@ function events.storm(duration)
 end
 
 -- ── Blackout ──────────────────────────────────────────────────────────────────
--- Pole unit-numbers are stored so we can safely re-enable them even if the
--- entity reference becomes stale (e.g. poles destroyed and rebuilt).
+-- Pole unit-numbers are stored so we can safely re-enable them via
+-- game.get_entity_by_unit_number() even if entity references become stale.
 
 --- Disables all electric poles for `duration` seconds, then restores them.
 function events.blackout(duration)
@@ -111,7 +119,7 @@ function events.blackout(duration)
   local surface = game.surfaces[1]
 
   local poles = surface.find_entities_filtered{
-    type  = {"electric-pole"},
+    type  = "electric-pole",
     force = "player",
   }
 
@@ -150,7 +158,7 @@ function events.belt_reverse()
   local count = 0
   for _, belt in ipairs(belts) do
     if belt.valid then
-      -- Directions: 0=N, 2=E, 4=S, 6=W  (defines.direction values × 2)
+      -- Directions: 0=N, 2=E, 4=S, 6=W  (defines.direction values)
       belt.direction = (belt.direction + 4) % 8
       count = count + 1
     end
@@ -172,10 +180,7 @@ function events.ore_delete()
     {base.x + radius, base.y + radius},
   }
 
-  local resources = surface.find_entities_filtered{
-    area = area,
-    type = "resource",
-  }
+  local resources = surface.find_entities_filtered{area = area, type = "resource"}
 
   local count = 0
   for _, res in ipairs(resources) do
@@ -186,6 +191,148 @@ function events.ore_delete()
   end
 
   game.print("[Twitch] ⛏  Ore deleted! " .. count .. " resource patches removed around the player.")
+end
+
+-- ── Rail Destroy ──────────────────────────────────────────────────────────────
+
+--- Randomly destroys up to `count` rail segments near the player's position.
+function events.rail_destroy(count)
+  local surface = game.surfaces[1]
+  count = clamp(count, 1, 50)
+
+  local base = get_player_position()
+  local radius = 200
+  local area = {
+    {base.x - radius, base.y - radius},
+    {base.x + radius, base.y + radius},
+  }
+
+  local rails = surface.find_entities_filtered{
+    type  = {"straight-rail", "curved-rail", "half-diagonal-rail"},
+    force = "player",
+    area  = area,
+  }
+
+  if #rails == 0 then
+    game.print("[Twitch] 🚂 Rail Destroy: No rails found nearby!")
+    return
+  end
+
+  -- Build index list, shuffle, and destroy up to `count` entries
+  local indices = {}
+  for i = 1, #rails do indices[i] = i end
+  shuffle(indices)
+
+  local destroyed = 0
+  for i = 1, math.min(count, #indices) do
+    local rail = rails[indices[i]]
+    if rail and rail.valid then
+      rail.destroy()
+      destroyed = destroyed + 1
+    end
+  end
+
+  game.print("[Twitch] 🚂 Rail Destroy! " .. destroyed .. " rail segments removed!")
+end
+
+-- ── Combustion Stop ───────────────────────────────────────────────────────────
+-- Temporarily disables all burner-powered machines owned by the player.
+-- Entity unit-numbers are stored so they can be restored later via
+-- game.get_entity_by_unit_number().
+
+--- Halts all burner machines for `duration` seconds, then restores them.
+function events.combustion_stop(duration)
+  duration = clamp(duration, 5, 300)
+  local surface = game.surfaces[1]
+
+  -- Collect candidates by known burner entity types
+  local burner_types = {
+    "mining-drill",   -- covers burner-mining-drill
+    "furnace",        -- stone-furnace, steel-furnace
+    "boiler",
+    "locomotive",
+    "car",
+    "tank",
+    "artillery-wagon",
+  }
+
+  local candidates = surface.find_entities_filtered{
+    type  = burner_types,
+    force = "player",
+  }
+
+  if not storage.combustion_restore then
+    storage.combustion_restore = {}
+  end
+
+  local restore_tick = game.tick + (duration * 60)
+  local unit_numbers = {}
+
+  for _, entity in ipairs(candidates) do
+    -- Only disable entities that actually use burner energy
+    if entity.valid and entity.burner then
+      entity.active = false
+      table.insert(unit_numbers, entity.unit_number)
+    end
+  end
+
+  table.insert(storage.combustion_restore, {
+    tick         = restore_tick,
+    unit_numbers = unit_numbers,
+  })
+
+  game.print("[Twitch] 🔥 Combustion Stop! All burner machines halted for " .. duration .. " seconds!")
+end
+
+-- ── Spawn Inside ──────────────────────────────────────────────────────────────
+
+--- Spawns `count` medium biters inside the player's base perimeter by placing
+--- them adjacent to random player-owned buildings.
+function events.spawn_inside(count)
+  local surface = game.surfaces[1]
+  count = clamp(count, 1, 15)
+
+  local base = get_player_position()
+  local radius = 100
+
+  -- Find player structures to determine base extent
+  local buildings = surface.find_entities_filtered{
+    force = "player",
+    area  = {
+      {base.x - radius, base.y - radius},
+      {base.x + radius, base.y + radius},
+    },
+  }
+
+  local spawned = 0
+
+  if #buildings > 0 then
+    for _ = 1, count do
+      local target = buildings[math.random(#buildings)]
+      if target and target.valid then
+        local tx = target.position.x + math.random(-5, 5)
+        local ty = target.position.y + math.random(-5, 5)
+        local entity = surface.create_entity{
+          name     = "medium-biter",
+          position = {tx, ty},
+          force    = "enemy",
+        }
+        if entity then spawned = spawned + 1 end
+      end
+    end
+  else
+    -- Fallback: spawn very close to the player
+    for _ = 1, count do
+      local entity = surface.create_entity{
+        name     = "medium-biter",
+        position = {base.x + math.random(-10, 10), base.y + math.random(-10, 10)},
+        force    = "enemy",
+      }
+      if entity then spawned = spawned + 1 end
+    end
+  end
+
+  game.print("[Twitch] 👾 SPAWN INSIDE! " .. spawned .. " enemies appeared inside your base!")
 end
 
 -- ── Nuke ──────────────────────────────────────────────────────────────────────

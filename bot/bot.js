@@ -18,6 +18,39 @@ let activeVote = null;
 // Timer handle for random events
 let randomEventTimer = null;
 
+// ── Difficulty tier helpers ────────────────────────────────────────────────────
+
+const DEFAULT_DIFFICULTIES = {
+  easy: {
+    description: "Fun, low-impact events. Free for everyone via chat.",
+    minBits: 0,
+    allowedRoles: ["broadcaster", "moderator", "vip", "subscriber", "everyone"],
+  },
+  medium: {
+    description: "Moderate disruption. Requires subscriber or 100 bits.",
+    minBits: 100,
+    allowedRoles: ["broadcaster", "moderator", "vip", "subscriber"],
+  },
+  hard: {
+    description: "Severe disruption. Requires 500 bits or moderator+.",
+    minBits: 500,
+    allowedRoles: ["broadcaster", "moderator"],
+  },
+};
+
+/** Returns the difficulty tier name ("easy" | "medium" | "hard") for a command. */
+function getCommandDifficulty(commandName) {
+  return (
+    (config.commandDifficulty && config.commandDifficulty[commandName]) || "easy"
+  );
+}
+
+/** Returns the difficulty configuration object for a given tier name. */
+function getDifficultyConfig(difficulty) {
+  const tiers = config.difficulties || DEFAULT_DIFFICULTIES;
+  return tiers[difficulty] || tiers.easy || DEFAULT_DIFFICULTIES.easy;
+}
+
 // ── Role helpers ───────────────────────────────────────────────────────────────
 
 /**
@@ -34,14 +67,6 @@ function getUserRole(tags) {
   return "everyone";
 }
 
-const ROLE_RANK = {
-  broadcaster: 4,
-  moderator: 3,
-  vip: 2,
-  subscriber: 1,
-  everyone: 0,
-};
-
 /**
  * Returns true if the user's role is in the allowed-roles list for a command.
  */
@@ -50,6 +75,36 @@ function isRoleAllowed(userRole, allowedRoles) {
   // If "everyone" is allowed, all roles pass.
   if (allowedRoles.includes("everyone")) return true;
   return allowedRoles.includes(userRole);
+}
+
+/**
+ * Checks whether a user can execute a command, considering both role and bits.
+ * @param {string} commandName
+ * @param {string} userRole  - result of getUserRole()
+ * @param {number|null} bitsAmount - bits donated in this message (0 or null = none)
+ * @returns {{ allowed: boolean, via?: string, difficulty?: string, minBits?: number }}
+ */
+function canExecuteCommand(commandName, userRole, bitsAmount) {
+  const difficulty = getCommandDifficulty(commandName);
+  const diffConfig = getDifficultyConfig(difficulty);
+
+  // Role-based access (normal chat command)
+  if (isRoleAllowed(userRole, diffConfig.allowedRoles)) {
+    return { allowed: true, via: "role" };
+  }
+
+  // Bits-based access (cheer event)
+  const minBits = diffConfig.minBits || 0;
+  if (minBits > 0 && bitsAmount != null && bitsAmount >= minBits) {
+    return { allowed: true, via: "bits" };
+  }
+
+  return {
+    allowed: false,
+    difficulty,
+    minBits: diffConfig.minBits || 0,
+    allowedRoles: diffConfig.allowedRoles,
+  };
 }
 
 // ── Cooldown helpers ───────────────────────────────────────────────────────────
@@ -65,9 +120,9 @@ function isOnCooldown(commandName) {
 
 function isUserOnCooldown(username) {
   const now = Date.now();
-  const global = (config.commands.globalCooldownSeconds || 30) * 1000;
-  if (lastUserTime[username] && now - lastUserTime[username] < global) {
-    return Math.ceil((global - (now - lastUserTime[username])) / 1000);
+  const globalMs = (config.commands.globalCooldownSeconds || 30) * 1000;
+  if (lastUserTime[username] && now - lastUserTime[username] < globalMs) {
+    return Math.ceil((globalMs - (now - lastUserTime[username])) / 1000);
   }
   return 0;
 }
@@ -82,17 +137,12 @@ function setCooldown(commandName, username) {
 /**
  * Sends a /silent-command to Factorio by appending it to the console input
  * file that Factorio watches, or via RCON if configured.
- *
- * The command string should be the Lua expression that follows
- * /silent-command, e.g. remote.call("twitch_events","meteor",100,200)
  */
 function sendToFactorio(luaCommand) {
   const fullCommand = `/silent-command ${luaCommand}\n`;
 
-  // RCON path (optional – requires factorio-rcon or similar)
+  // RCON path (optional – integrate an npm rcon library in this block)
   if (config.factorio.rconHost && config.factorio.rconPort) {
-    // RCON is intentionally left as a placeholder.
-    // Users can integrate a library such as `rcon` from npm.
     console.log(`[RCON] Would send: ${fullCommand.trim()}`);
     return;
   }
@@ -116,13 +166,24 @@ function sendToFactorio(luaCommand) {
 // ── Command definitions ────────────────────────────────────────────────────────
 
 /**
+ * Parses an integer coord arg; uses a fallback only when the value is absent or NaN.
+ * Explicitly handles 0 as a valid coordinate.
+ */
+function parseCoord(arg, fallback) {
+  const n = parseInt(arg, 10);
+  return Number.isNaN(n) ? fallback() : n;
+}
+
+/**
  * Each command maps to a function that returns the Lua expression to execute.
  * Commands receive the parsed arguments array (strings after the command word).
  */
 const COMMANDS = {
+  // ── Easy tier ───────────────────────────────────────────────────────────────
+
   meteor(args) {
-    const x = parseInt(args[0], 10) || Math.floor(Math.random() * 400) - 200;
-    const y = parseInt(args[1], 10) || Math.floor(Math.random() * 400) - 200;
+    const x = parseCoord(args[0], () => Math.floor(Math.random() * 400) - 200);
+    const y = parseCoord(args[1], () => Math.floor(Math.random() * 400) - 200);
     return `remote.call("twitch_events","meteor",${x},${y})`;
   },
 
@@ -136,25 +197,96 @@ const COMMANDS = {
     return `remote.call("twitch_events","storm",${duration})`;
   },
 
+  belt_reverse() {
+    return `remote.call("twitch_events","belt_reverse")`;
+  },
+
+  // ── Medium tier ─────────────────────────────────────────────────────────────
+
   blackout(args) {
     const duration = Math.min(parseInt(args[0], 10) || 60, 300);
     return `remote.call("twitch_events","blackout",${duration})`;
-  },
-
-  belt_reverse() {
-    return `remote.call("twitch_events","belt_reverse")`;
   },
 
   ore_delete() {
     return `remote.call("twitch_events","ore_delete")`;
   },
 
+  rail_destroy(args) {
+    const count = Math.min(parseInt(args[0], 10) || 10, 50);
+    return `remote.call("twitch_events","rail_destroy",${count})`;
+  },
+
+  combustion_stop(args) {
+    const duration = Math.min(parseInt(args[0], 10) || 60, 300);
+    return `remote.call("twitch_events","combustion_stop",${duration})`;
+  },
+
+  // ── Hard tier ───────────────────────────────────────────────────────────────
+
+  spawn_inside(args) {
+    const count = Math.min(parseInt(args[0], 10) || 5, 15);
+    return `remote.call("twitch_events","spawn_inside",${count})`;
+  },
+
   nuke(args) {
-    const x = parseInt(args[0], 10) || Math.floor(Math.random() * 400) - 200;
-    const y = parseInt(args[1], 10) || Math.floor(Math.random() * 400) - 200;
+    const x = parseCoord(args[0], () => Math.floor(Math.random() * 400) - 200);
+    const y = parseCoord(args[1], () => Math.floor(Math.random() * 400) - 200);
     return `remote.call("twitch_events","nuke",${x},${y})`;
   },
 };
+
+// ── Cheer (bits) handler ───────────────────────────────────────────────────────
+
+/**
+ * Handles a Twitch cheer (bits donation).
+ * Parses the cheer message for a command name; if the bit amount meets the
+ * tier's minimum threshold the event is executed immediately.
+ */
+function handleCheer(client, channel, tags, message) {
+  const bits = parseInt(tags.bits, 10);
+  if (!bits || bits <= 0) return;
+
+  const prefix = config.commands.prefix || "!";
+  // Escape the prefix for use inside a RegExp
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = message.match(new RegExp(`${escaped}(\\w+)`, "i"));
+  if (!match) return;
+
+  const commandName = match[1].toLowerCase();
+  if (!COMMANDS[commandName]) return;
+
+  const difficulty = getCommandDifficulty(commandName);
+  const diffConfig = getDifficultyConfig(difficulty);
+  const minBits = diffConfig.minBits || 0;
+
+  if (minBits > 0 && bits < minBits) {
+    client.say(
+      channel,
+      `@${tags.username} Need ${minBits} bits to trigger !${commandName} (${difficulty} tier). You donated ${bits} bits.`
+    );
+    return;
+  }
+
+  const cmdWait = isOnCooldown(commandName);
+  if (cmdWait > 0) {
+    client.say(
+      channel,
+      `@${tags.username} !${commandName} is on cooldown. Try again in ${cmdWait}s.`
+    );
+    return;
+  }
+
+  const lua = COMMANDS[commandName]([]);
+  if (!lua) return;
+
+  sendToFactorio(lua);
+  setCooldown(commandName, tags.username);
+  client.say(
+    channel,
+    `@${tags.username} cheered ${bits} bits and triggered !${commandName}! [${difficulty.toUpperCase()}] 🎉`
+  );
+}
 
 // ── Voting ─────────────────────────────────────────────────────────────────────
 
@@ -236,14 +368,24 @@ function handleMessage(client, channel, tags, message) {
   if (!COMMANDS[commandName]) return;
 
   const userRole = getUserRole(tags);
-  const allowedRoles =
-    (config.commands.allowedRoles && config.commands.allowedRoles[commandName]) || [];
+  const check = canExecuteCommand(commandName, userRole, null);
 
-  if (!isRoleAllowed(userRole, allowedRoles)) {
-    client.say(
-      channel,
-      `@${tags.username} You don't have permission to use !${commandName}.`
-    );
+  if (!check.allowed) {
+    const difficulty = getCommandDifficulty(commandName);
+    const diffConfig = getDifficultyConfig(difficulty);
+    const minBits = diffConfig.minBits || 0;
+
+    if (minBits > 0) {
+      client.say(
+        channel,
+        `@${tags.username} !${commandName} is a ${difficulty.toUpperCase()} event – requires ${minBits} bits or a higher role.`
+      );
+    } else {
+      client.say(
+        channel,
+        `@${tags.username} You don't have permission to use !${commandName}.`
+      );
+    }
     return;
   }
 
@@ -274,9 +416,13 @@ function handleMessage(client, channel, tags, message) {
   const lua = COMMANDS[commandName](args);
   if (!lua) return;
 
+  const difficulty = getCommandDifficulty(commandName);
   sendToFactorio(lua);
   setCooldown(commandName, tags.username);
-  client.say(channel, `@${tags.username} triggered !${commandName}!`);
+  client.say(
+    channel,
+    `@${tags.username} triggered !${commandName}! [${difficulty.toUpperCase()}]`
+  );
 }
 
 // ── Bot setup ──────────────────────────────────────────────────────────────────
@@ -298,6 +444,10 @@ function start() {
   client.on("message", (channel, tags, message, self) => {
     if (self) return;
     handleMessage(client, channel, tags, message);
+  });
+
+  client.on("cheer", (channel, tags, message) => {
+    handleCheer(client, channel, tags, message);
   });
 
   client.on("connected", (addr, port) => {
@@ -328,10 +478,14 @@ function start() {
 module.exports = {
   getUserRole,
   isRoleAllowed,
+  canExecuteCommand,
+  getCommandDifficulty,
+  getDifficultyConfig,
   isOnCooldown,
   isUserOnCooldown,
   setCooldown,
   handleMessage,
+  handleCheer,
   COMMANDS,
   lastCommandTime,
   lastUserTime,
